@@ -7,6 +7,7 @@
   "components": {
     "nxgenerator": {"version": "0.2.2", "tag": "nxgenerator-v0.2.2", "archive_sha256": "8e5b0a3d9408aa38399bbc5871c58245d2adbe2ca42eaa4b7f038ee58b764eb0"},
     "nxbootstrap": {"version": "0.6.8", "tag": "nxbootstrap-v0.6.8", "archive_sha256": "0a8366a649862165d689bb3f9c33f95e9a8240b88bd0fa2585bcaccf04b6f7d4"},
+    "nxextract": {"version": "1.2.6", "tag": "nxgl-v0.2.6", "archive_sha256": "2f0c1c2a837b25ec196400ff166f5fdca95d7b0abce535e9f8486861853f0772"},
     "nxloader": {"version": "0.7.2", "tag": "nxloader-v0.7.2", "archive_sha256": "f26bfd750d104f0ee806f20c0f98b7db9c8ae45b1de28a72ebcb91c6c81354fa"},
     "nxcompat": {"version": "0.2.1", "tag": "nxgl-v0.2.6", "archive_sha256": "3cd352b2a05810ac953d756a564ae0308dd8d2b2bd2e22441635eb7654c50558"},
     "nxgl": {"version": "0.2.6", "tag": "nxgl-v0.2.6", "archive_sha256": "29c8310b30312c5a0c7427794a1aca1803a1e1951740bfdbd78d3af6d21c9033"},
