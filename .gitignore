@@ -1,0 +1,17 @@
+*.apk
+*.apkm
+*.apks
+*.obb
+*.xapk
+*.zip
+*.sha256
+build/
+dist/
+stage/
+actionsquad/assets/
+actionsquad/libAndroidEntryPoint.so
+actionsquad/gamedata/*.xml
+actionsquad/userdata/
+actionsquad/*.log
+actionsquad/.nxextract-*.json
+actionsquad/.nxextract-*.json.*
