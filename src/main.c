@@ -37,6 +37,7 @@
 #include "jni_shim.h"
 #include "opensles_shim.h"
 #include "so_util.h"
+#include "nxgl_frame_proof_adapter.h"
 
 #define GAME_SO      "libAndroidEntryPoint.so"
 #define GAME_HEAP_MB 384
@@ -400,6 +401,9 @@ typedef void (*set_have_controller_t)(void *env, void *obj, int count,
                                       void *name, int device_id);
 
 int main(int argc, char **argv) {
+  /* Emitted before anything can fail: the launch context is what a reader
+   * needs to know whether a startup failure says anything about the port. */
+  nxgl_frame_proof_launch_receipt();
   (void)argc;
   g_process_argv = argv;
   setvbuf(stdout, NULL, _IONBF, 0);

@@ -20,6 +20,7 @@
 
 #include "egl_shim.h"
 #include "util.h"
+#include "nxgl_frame_proof_adapter.h"
 
 extern int as_retry_sdl_provider(const char *stage);
 
@@ -463,6 +464,17 @@ EGLBoolean egl_shim_SwapBuffers(EGLDisplay dpy, EGLSurface surface) {
   if (has_real_gl && current_context && !current_context->is_pbuffer) {
     coi_maybe_screenshot();
     { static unsigned fs = 0; if ((++fs % 900) == 0) coi_stack_shrink(); }
+    /* Framework frame proof, immediately before the real present: three
+     * samples over the run; the first can still be a legitimately black title
+     * card. */
+    {
+      static unsigned long proof_frame;
+      proof_frame++;
+      if (proof_frame == 300 || proof_frame == 600 || proof_frame == 900) {
+        nxgl_frame_proof_sample(0, 0);
+        nxgl_frame_proof_publish();
+      }
+    }
     SDL_GL_SwapWindow(egl_window);
     /* [PERF] frame-time entre swaps; relatório a cada ~5s (diagnóstico do lag;
      * custo: 1 clock_gettime/frame + 1 fprintf/5s). */

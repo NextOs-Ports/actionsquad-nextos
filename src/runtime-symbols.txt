@@ -9,7 +9,6 @@ SDL_GameControllerAddMapping
 SDL_GameControllerClose
 SDL_GameControllerGetAxis
 SDL_GameControllerGetButton
-SDL_GameControllerMappingForDeviceIndex
 SDL_GameControllerName
 SDL_GameControllerOpen
 SDL_GameControllerUpdate

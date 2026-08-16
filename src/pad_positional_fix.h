@@ -35,6 +35,7 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <linux/input.h>
+#include <dlfcn.h>
 #include <SDL2/SDL.h>
 
 #define PAD_POS_NBITS(x) (((x) + 8 * sizeof(long) - 1) / (8 * sizeof(long)))
@@ -121,7 +122,18 @@ static void pad_positional_fix_apply(int index, const char *env_prefix) {
   if (i_a < 0 || i_b < 0) return;
 
   char map[1024];
-  char *cur = SDL_GameControllerMappingForDeviceIndex(index);
+  /* SDL_GameControllerMappingForDeviceIndex is SDL 2.0.9. The public ELF keeps
+   * its floor at 2.0.4, so resolve it at runtime; the else-branch below builds
+   * a mapping from the GUID and name and already covers a firmware without it. */
+  typedef char *(*pad_pos_mapping_fn)(int);
+  static pad_pos_mapping_fn pad_pos_mapping;
+  static int pad_pos_mapping_resolved;
+  if (!pad_pos_mapping_resolved) {
+    pad_pos_mapping_resolved = 1;
+    pad_pos_mapping = (pad_pos_mapping_fn)dlsym(
+        RTLD_DEFAULT, "SDL_GameControllerMappingForDeviceIndex");
+  }
+  char *cur = pad_pos_mapping ? pad_pos_mapping(index) : NULL;
   if (cur) {
     snprintf(map, sizeof(map), "%s", cur);
     SDL_free(cur);

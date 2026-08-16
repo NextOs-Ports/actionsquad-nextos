@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 /*
  * android_shim.c -- fake Android NDK for Linux ARM64
  *
@@ -11,6 +12,7 @@
  *   standard AInputQueue_getEvent flow.
  */
 
+#include <dlfcn.h>
 #include <SDL2/SDL.h>
 #include <fcntl.h>
 #include <linux/input.h>
@@ -220,10 +222,25 @@ static void init_gamecontroller(void) {
               "mapped=%d\n", i,
               SDL_JoystickNameForIndex(i) ? SDL_JoystickNameForIndex(i) : "",
               guid_string, SDL_IsGameController(i));
-    char *mapping = SDL_GameControllerMappingForDeviceIndex(i);
-    if (mapping) {
-      logPrintf("android_shim: candidate mapping: %s\n", mapping);
-      SDL_free(mapping);
+    /* SDL_GameControllerMappingForDeviceIndex is SDL 2.0.9; the public ELF
+     * keeps its floor at 2.0.4, so the diagnostic mapping dump is resolved at
+     * runtime and simply absent on older firmware. */
+    {
+      typedef char *(*mapping_for_index_fn)(int);
+      static mapping_for_index_fn mapping_for_index;
+      static int resolved;
+      if (!resolved) {
+        resolved = 1;
+        mapping_for_index = (mapping_for_index_fn)dlsym(
+            RTLD_DEFAULT, "SDL_GameControllerMappingForDeviceIndex");
+      }
+      if (mapping_for_index) {
+        char *mapping = mapping_for_index(i);
+        if (mapping) {
+          logPrintf("android_shim: candidate mapping: %s\n", mapping);
+          SDL_free(mapping);
+        }
+      }
     }
     if (SDL_IsGameController(i)) {
       g_gamecontroller = SDL_GameControllerOpen(i);

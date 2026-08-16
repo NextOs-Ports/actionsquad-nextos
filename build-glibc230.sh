@@ -64,6 +64,7 @@ aarch64-linux-gnu-gcc \
   /src/src/main.c /src/src/so_util.c /src/src/util.c /src/src/error.c \
   /src/src/imports.c /src/src/as_shims.c /src/src/pthread_bridge.c \
   /src/src/jni_shim.c /src/src/egl_shim.c /src/src/android_shim.c \
+  /src/src/nxgl_frame_proof_adapter.c \
   /src/src/opensles_shim.c /src/src/coi_shims.c /src/src/etc1_encode.c \
   /src/src/etc2_decode.c \
   -lSDL2 -lGLESv2 -lEGL -ldl -lm -lpthread -lgcc

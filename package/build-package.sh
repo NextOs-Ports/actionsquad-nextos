@@ -1,134 +1,88 @@
 #!/usr/bin/env bash
+# Build, gate and bundle the public actionsquad BYO-data release.
+#
+# Generated from framework/nxrelease/templates/build-package.sh.in. This is
+# the one shape every port packages through, so nx-ship-port can build,
+# verify, install and prove a port in one run without learning per-port
+# spellings. Nothing here is typed by hand: the loader is rebuilt from source,
+# the manifest is rendered from the tree, and the release tool gates the zip.
 set -euo pipefail
 
 export LC_ALL=C
 export TZ=UTC
-export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1786665600}
-umask 022
+export PYTHONDONTWRITEBYTECODE=1
+umask 077
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
-OUT=${1:-"$ROOT/dist"}
-ARCHIVE="$OUT/actionsquad.zip"
-HASH_FILE="$ARCHIVE.sha256"
-
-fail() {
-  printf 'actionsquad package error: %s\n' "$*" >&2
-  exit 1
-}
-
-[[ ! -e $ARCHIVE && ! -e $HASH_FILE ]] || fail "release output already exists: $OUT"
-[[ -x $ROOT/build/actionsquad-nextos ]] || fail "build/actionsquad-nextos is missing"
-
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/actionsquad-package.XXXXXX")
-cleanup() {
-  case $WORK in
-    "${TMPDIR:-/tmp}"/actionsquad-package.*) rm -rf -- "$WORK" ;;
-    *) printf 'refusing unsafe cleanup path: %s\n' "$WORK" >&2 ;;
-  esac
-}
-trap cleanup EXIT INT TERM
-STAGE="$WORK/stage"
-VERIFY="$WORK/verify"
-mkdir -p -- "$STAGE" "$VERIFY" "$OUT"
-
-put() {
-  local mode=$1 source=$2 target=$3
-  [[ -f $ROOT/$source && ! -L $ROOT/$source ]] || fail "unsafe or missing source: $source"
-  install -D -m "$mode" -- "$ROOT/$source" "$STAGE/$target"
-}
-
-# Explicit allowlist: owner APK, native guest and extracted assets never enter.
-put 0755 "Action Squad.sh" "Action Squad.sh"
-put 0755 "build/actionsquad-nextos" "actionsquad/bin/aarch64/actionsquad-nextos"
-put 0644 "actionsquad/nxport.json" "actionsquad/nxport.json"
-put 0644 "actionsquad/nxproject.json" "actionsquad/nxproject.json"
-put 0644 "actionsquad/port-env.sh" "actionsquad/port-env.sh"
-put 0644 "actionsquad/extractor.json" "actionsquad/extractor.json"
-put 0644 "actionsquad/nxextract/nxextract.py" "actionsquad/nxextract/nxextract.py"
-put 0644 "actionsquad/nxextract/run-extractor.sh" "actionsquad/nxextract/run-extractor.sh"
-put 0644 "actionsquad/nxextract/nxextract-runtime-env.sh" "actionsquad/nxextract/nxextract-runtime-env.sh"
-put 0644 "actionsquad/port.json" "actionsquad/port.json"
-put 0644 "actionsquad/alsoft.conf" "actionsquad/alsoft.conf"
-put 0644 "actionsquad/README.md" "actionsquad/README.md"
-put 0644 "actionsquad/INSTALLATION.md" "actionsquad/INSTALLATION.md"
-put 0644 "actionsquad/LICENSE" "actionsquad/LICENSE"
-put 0644 "actionsquad/NOTICE.md" "actionsquad/NOTICE.md"
-put 0644 "actionsquad/version.txt" "actionsquad/version.txt"
-put 0644 "actionsquad/FRAMEWORK-PIN.json" "actionsquad/FRAMEWORK-PIN.json"
-put 0644 "actionsquad/adapter/adapter-contract.json" "actionsquad/adapter/adapter-contract.json"
-put 0644 "actionsquad/gamedata/LEIA-ME.txt" "actionsquad/gamedata/LEIA-ME.txt"
-
-[[ -f $STAGE/actionsquad/INSTALLATION.md ]] || fail "INSTALLATION.md path is wrong"
-[[ $(sha256sum "$ROOT/actionsquad/INSTALLATION.md" | awk '{print $1}') == \
-   $(sha256sum "$STAGE/actionsquad/INSTALLATION.md" | awk '{print $1}') ]] ||
-  fail "INSTALLATION.md differs from the documented recipe"
-
-if find "$STAGE" -type f \( -iname '*.apk' -o -iname '*.apkm' -o -iname '*.apks' \
-  -o -iname '*.xapk' -o -iname '*.obb' -o -iname '*.dex' \
-  -o -iname 'libAndroidEntryPoint.so' \) -print -quit | grep -q .; then
-  fail "proprietary owner data leaked into release"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+PORT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)
+FRAMEWORK_ROOT=${NEXTOS_FRAMEWORK_ROOT:-${NX_FRAMEWORK_ROOT:-}}
+if [[ -z $FRAMEWORK_ROOT ]]; then
+  # A port inside the monorepo finds the framework two levels up; a port in
+  # its own repository names it through the environment.
+  for candidate in "$PORT_DIR/../../framework" "$PORT_DIR/../nextos_ports_android/framework"; do
+    if [[ -f $candidate/nxbootstrap/VERSION ]]; then
+      FRAMEWORK_ROOT=$(CDPATH= cd -- "$candidate" && pwd -P); break
+    fi
+  done
 fi
-[[ ! -e $STAGE/actionsquad/assets ]] || fail "proprietary assets leaked into release"
+[[ -n $FRAMEWORK_ROOT && -f $FRAMEWORK_ROOT/nxbootstrap/VERSION ]] ||
+  { printf 'set NEXTOS_FRAMEWORK_ROOT to the pinned NextOS framework tree\n' >&2; exit 1; }
 
-while IFS= read -r shell_path; do
-  bash -n "$shell_path" || fail "shell syntax failed: $shell_path"
-done < <(find "$STAGE" -type f -name '*.sh' -print | sort)
+NXRELEASE="$FRAMEWORK_ROOT/nxrelease/nxrelease.py"
+RENDER="$FRAMEWORK_ROOT/nxrelease/nx-render-manifest.py"
+MANIFEST="$PORT_DIR/nxrelease.json"
+PORT_ID=actionsquad
+SOURCE_URL=https://github.com/NextOs-Ports/actionsquad-nextos
+MAX_GLIBC=2.30
 
-python3 - "$STAGE" <<'PY'
-import pathlib, re, sys
-root = pathlib.Path(sys.argv[1])
-external_stat = re.compile(r"(?<![A-Za-z0-9_./-])stat(?=\s|$)")
-for path in root.rglob("*.sh"):
-    for number, line in enumerate(path.read_text(errors="strict").splitlines(), 1):
-        if line.lstrip().startswith("#"):
-            continue
-        if external_stat.search(line):
-            raise SystemExit(f"external stat command in {path.relative_to(root)}:{number}")
-PY
+fail() { printf '%s package error: %s\n' "$PORT_ID" "$*" >&2; exit 1; }
 
-python3 -B "$STAGE/actionsquad/nxextract/nxextract.py" recipe-check \
-  --recipe "$STAGE/actionsquad/extractor.json" >/dev/null
-[[ $(python3 -B "$STAGE/actionsquad/nxextract/nxextract.py" --version) == \
-   'NXExtract 1.2.6' ]] || fail "NXExtract version drift"
+[[ -f $NXRELEASE ]] || fail "release tool missing: $NXRELEASE"
+[[ -f $RENDER ]] || fail "manifest renderer missing: $RENDER"
 
-ELF="$STAGE/actionsquad/bin/aarch64/actionsquad-nextos"
-file "$ELF" | grep -q 'ARM aarch64' || fail "release executable is not AArch64"
-[[ $(readelf -l "$ELF" | sed -n 's@.*Requesting program interpreter: \(.*\)]@\1@p') == \
-   '/lib/ld-linux-aarch64.so.1' ]] || fail "unexpected ELF interpreter"
-MAX_GLIBC=$(readelf --version-info "$ELF" |
-  sed -n 's/.*Name: GLIBC_\([0-9][0-9.]*\).*/\1/p' | sort -Vu | tail -n 1)
-[[ -n $MAX_GLIBC ]] || fail "cannot determine GLIBC requirement"
-[[ $(printf '%s\n%s\n' 2.30 "$MAX_GLIBC" | sort -V | tail -n 1) == 2.30 ]] ||
-  fail "ELF exceeds GLIBC_2.30: GLIBC_$MAX_GLIBC"
-[[ $(find "$STAGE" -type f -exec file --brief {} \; | grep -c '^ELF ') == 1 ]] ||
-  fail "unclassified or missing ELF in package"
+# The loader is always rebuilt from source: a package that ships a binary
+# nobody rebuilt is how a fix in src/ silently never reaches a device.
+if [[ ${NX_SKIP_BUILD:-0} != 1 ]]; then
+  if [[ -x $PORT_DIR/build.sh ]]; then
+    (cd "$PORT_DIR" && ./build.sh) || fail 'loader build failed'
+  elif [[ -x $PORT_DIR/build_universal.sh ]]; then
+    (cd "$PORT_DIR" && ./build_universal.sh) || fail 'loader build failed'
+  elif [[ -x $PORT_DIR/build-glibc230.sh ]]; then
+    (cd "$PORT_DIR" && ./build-glibc230.sh && cp build/actionsquad-nextos actionsquad-nextos) ||
+      fail 'loader build failed'
+  else
+    fail 'no build script'
+  fi
+fi
 
-(
-  cd "$STAGE"
-  find . -type f ! -path './actionsquad/RELEASE-MANIFEST.sha256' -print0 |
-    sort -z | xargs -0 sha256sum > actionsquad/RELEASE-MANIFEST.sha256
-)
-find "$STAGE" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
+python3 -B "$RENDER" --port-dir "$PORT_DIR" --framework-root "$FRAMEWORK_ROOT" \
+  --source-url "$SOURCE_URL" --max-glibc "$MAX_GLIBC" || fail 'manifest render failed'
 
-TMP_ARCHIVE="$WORK/actionsquad.zip"
-(
-  cd "$STAGE"
-  find . -type f -printf '%P\n' | sort | zip -X -q -9 "$TMP_ARCHIVE" -@
-)
-unzip -q "$TMP_ARCHIVE" -d "$VERIFY"
-[[ -f $VERIFY/actionsquad/INSTALLATION.md ]] || fail "final ZIP lost INSTALLATION.md"
-[[ $(sha256sum "$VERIFY/actionsquad/INSTALLATION.md" | awk '{print $1}') == \
-   $(sha256sum "$ROOT/actionsquad/INSTALLATION.md" | awk '{print $1}') ]] ||
-  fail "final ZIP INSTALLATION.md hash mismatch"
-(
-  cd "$VERIFY"
-  sha256sum -c actionsquad/RELEASE-MANIFEST.sha256 >/dev/null
-)
+python3 -B "$NXRELEASE" validate --manifest "$MANIFEST" --max-glibc "$MAX_GLIBC" ||
+  fail 'manifest validation failed'
 
-install -m 0644 "$TMP_ARCHIVE" "$ARCHIVE"
-(
-  cd "$OUT"
-  sha256sum actionsquad.zip > actionsquad.zip.sha256
-)
-printf 'release=%s\nmax_glibc=%s\n' "$ARCHIVE" "$MAX_GLIBC"
+VERSION=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["package"]["version"])' "$MANIFEST")
+DESTINATION=${1:-"$PORT_DIR/.build/$PORT_ID-$VERSION-nxrelease"}
+ARCHIVE_NAME="$PORT_ID.zip"
+
+STAGE=$(mktemp -d "${TMPDIR:-/tmp}/$PORT_ID-package.XXXXXX")
+trap 'rm -rf -- "$STAGE"' EXIT INT TERM
+[[ ! -e $DESTINATION ]] || fail "destination already exists (release outputs are never overwritten): $DESTINATION"
+mkdir -p -- "$(dirname -- "$DESTINATION")"
+
+python3 -B "$NXRELEASE" bundle \
+  --manifest "$MANIFEST" --stage "$STAGE/stage" \
+  --destination "$DESTINATION" --archive-name "$ARCHIVE_NAME" \
+  --max-glibc "$MAX_GLIBC" || fail 'bundle failed'
+
+ARCHIVE="$DESTINATION/$ARCHIVE_NAME"
+[[ -f $ARCHIVE ]] || fail "archive not produced: $ARCHIVE"
+
+python3 -B "$NXRELEASE" verify --archive "$ARCHIVE" --max-glibc "$MAX_GLIBC" ||
+  fail 'archive verification failed'
+python3 -B "$FRAMEWORK_ROOT/tests/audit-portmaster-zip.py" "$ARCHIVE" ||
+  fail 'PortMaster zip audit failed'
+
+sha256sum "$ARCHIVE" | awk '{print $1"  '"$ARCHIVE_NAME"'"}' > "$ARCHIVE.sha256"
+printf '%s PUBLIC PACKAGE PASS: %s\n' "$PORT_ID" "$ARCHIVE"
 sha256sum "$ARCHIVE"
