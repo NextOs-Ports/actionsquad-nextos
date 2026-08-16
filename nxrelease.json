@@ -146,9 +146,16 @@
     {
       "kind": "payload",
       "mode": "0644",
-      "sha256": "01c0f7d03b9babc6fef8d759c4202fdd1b0235a589c798e3b8e37accb06ad5ce",
+      "sha256": "59854984853104df5c353e2f681a15fc7924742f9a2e468c29af248dce45ce03",
       "source": "version.txt",
       "target": "actionsquad/version.txt"
+    },
+    {
+      "kind": "payload",
+      "mode": "0644",
+      "sha256": "e2286625df3f72ead0845cb982c66a9314bbe5ae4af65360e27b2b113b359db3",
+      "source": "FRAMEWORK-PIN.json",
+      "target": "actionsquad/FRAMEWORK-PIN.json"
     },
     {
       "kind": "payload",
@@ -262,7 +269,7 @@
     },
     "port_dir": "actionsquad",
     "profile": "universal-portmaster",
-    "version": "1.0.0-rc2"
+    "version": "1.0.0"
   },
   "portmaster_metadata": {
     "gameinfo_xml": {
