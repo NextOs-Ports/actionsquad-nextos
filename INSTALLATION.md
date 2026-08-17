@@ -31,7 +31,8 @@ Installed layout:
 ports/
 ├── Action Squad.sh
 └── actionsquad/
-    ├── bin/aarch64/actionsquad-nextos
+    ├── actionsquad-nextos        # loader
+    ├── nxsplash-nextos
     ├── gamedata/                 # place the owner's APK here
     ├── libAndroidEntryPoint.so   # installed by NXExtract
     ├── assets/all/               # installed by NXExtract
@@ -74,7 +75,8 @@ Layout instalado:
 ports/
 ├── Action Squad.sh
 └── actionsquad/
-    ├── bin/aarch64/actionsquad-nextos
+    ├── actionsquad-nextos        # loader
+    ├── nxsplash-nextos
     ├── gamedata/                 # coloque aqui o APK do dono
     ├── libAndroidEntryPoint.so   # instalada pelo NXExtract
     ├── assets/all/               # instalada pelo NXExtract
