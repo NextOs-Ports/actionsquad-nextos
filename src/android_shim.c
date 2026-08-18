@@ -729,6 +729,22 @@ static void as_touch_begin(float x, float y, const char *why) {
             y);
 }
 
+/* Alvo vertical do botao Confirm do dialogo "Controller detected".  A UI e'
+ * desenhada para 1280x720 (16:9): ali o Confirm fica em y=250/720.  Numa tela
+ * NAO-16:9 (RG CubeXX 1:1 720x720, RG34XX-SP), a engine recentraliza o dialogo
+ * e o Confirm passa a ficar logo ACIMA do centro da tela -- o alvo 250/720
+ * (34,7%) erra o botao (era esse o bug de campo).  Para telas largas mantemos
+ * exatamente o alvo calibrado (zero regressao nos devices ja provados); para
+ * telas quadradas/altas miramos 46% da altura (acima do centro, longe do
+ * Cancel que fica abaixo).  coi_screen_w/h sao a resolucao REAL do device. */
+static float as_confirm_y_frac(void) {
+  float aspect =
+      (coi_screen_h > 0) ? (float)coi_screen_w / (float)coi_screen_h : 1.777f;
+  if (aspect >= 1.2f)
+    return 250.0f / 720.0f; /* 16:9 / 4:3 provados: inalterado */
+  return 0.46f;             /* quadrada/tall: Confirm acima do centro */
+}
+
 static void as_splash_tap_begin(void) {
   as_touch_begin((float)coi_screen_w * 0.5f,
                  (float)coi_screen_h * 0.5f, "splash confirm");
@@ -743,7 +759,7 @@ static void as_splash_tap_pump(void) {
   if (g_synth_tap_hold == 0 && g_controller_confirm_retry_delay > 0 &&
       --g_controller_confirm_retry_delay == 0)
     as_touch_begin((float)coi_screen_w * 0.5f,
-                   (float)coi_screen_h * (250.0f / 720.0f),
+                   (float)coi_screen_h * as_confirm_y_frac(),
                    "controller dialog confirm retry");
 }
 
@@ -768,7 +784,7 @@ static int as_maybe_confirm_splash(int action, int keycode) {
     g_suppress_confirm_a_up = 1;
     /* Confirm is centered at y=250 on the game's 1280x720 reference UI. */
     as_touch_begin((float)coi_screen_w * 0.5f,
-                   (float)coi_screen_h * (250.0f / 720.0f),
+                   (float)coi_screen_h * as_confirm_y_frac(),
                    "controller dialog confirm");
     return 1;
   }
