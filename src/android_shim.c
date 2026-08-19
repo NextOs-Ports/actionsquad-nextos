@@ -709,6 +709,7 @@ static int g_synth_tap_hold = 0;
 static float g_synth_tap_x = 0, g_synth_tap_y = 0;
 static int g_controller_confirm_pending = 0;
 static int g_controller_confirm_retry_delay = 0;
+static int g_controller_confirm_auto_delay = 0; /* v1.0.3: confirmar SOZINHO */
 static int g_suppress_confirm_a_up = 0;
 
 void android_shim_expect_controller_confirmation(void) {
@@ -717,6 +718,10 @@ void android_shim_expect_controller_confirmation(void) {
    * coordinates. */
   g_controller_confirm_pending = 1;
   g_controller_confirm_retry_delay = 0;
+  /* v1.0.3 (pedido de campo): o dialogo "Controller detected" e touch-first e
+   * confundia todo mundo. O proprio port confirma ~0,5s depois de o jogo
+   * criar o dialogo; apertar A antes disso continua funcionando igual. */
+  g_controller_confirm_auto_delay = 30;
 }
 
 static void as_touch_begin(float x, float y, const char *why) {
@@ -752,6 +757,14 @@ static void as_splash_tap_begin(void) {
 static void as_splash_tap_pump(void) {
   if (g_synth_tap_hold > 0 && --g_synth_tap_hold == 0)
     push_motion_event(6, g_synth_tap_x, g_synth_tap_y); /* POINTER_UP */
+  if (g_controller_confirm_pending && g_controller_confirm_auto_delay > 0 &&
+      --g_controller_confirm_auto_delay == 0) {
+    g_controller_confirm_pending = 0;
+    g_controller_confirm_retry_delay = 10;
+    as_touch_begin((float)coi_screen_w * 0.5f,
+                   (float)coi_screen_h * as_confirm_y_frac(),
+                   "controller dialog AUTO confirm");
+  }
   /* O mesmo A tambem chega ao caminho de tecla do popup. Algumas vezes o
    * primeiro POINTER_DOWN coincide com esse edge e e' descartado. Repetir o
    * toque uma vez, depois do key-up, preserva uma unica acao do usuario e cai

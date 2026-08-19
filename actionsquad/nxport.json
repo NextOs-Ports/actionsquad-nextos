@@ -2,13 +2,13 @@
   "architecture": "aarch64",
   "argument_mode": "game-dir-and-passthrough",
   "enabled_quirks": [],
-  "executable": "bin/aarch64/actionsquad-nextos",
+  "executable": "actionsquad-nextos",
   "home_mode": "port",
   "id": "actionsquad",
   "launcher_name": "Action Squad.sh",
   "nxextract": {
     "mode": "yes",
-    "version": "1.2.6"
+    "version": "1.2.12"
   },
   "prepare_script": "port-env.sh",
   "private_library_paths": [],
@@ -20,7 +20,8 @@
     "input.controller-mapping"
   ],
   "required_files": [
-    "bin/aarch64/actionsquad-nextos",
+    "actionsquad-nextos",
+    "nxsplash-nextos",
     "libAndroidEntryPoint.so",
     "assets/all/media/texts/strings.xml",
     "alsoft.conf"

@@ -67,6 +67,12 @@ static void pad_ordinal_fix_apply(int index, const char *env_prefix) {
     memset(absb, 0, sizeof(absb));
     if (ioctl(fd, EVIOCGID, &id) == 0 &&
         id.vendor == vid && id.product == pid &&
+        /* Pads gpio-keys (BUS_HOST) expõem códigos SEMÂNTICOS reais — a
+         * tabela vendor densa 0x130..0x13c tem BTN_C/BTN_Z como X/R1 físicos
+         * e disparava este fix por engano, atropelando o mapping correto da
+         * CFW (caso de campo: família H700 no Knulli, menu sem controle).
+         * O fix é só para HID de kernel antigo (USB/Bluetooth). */
+        id.bustype != BUS_HOST &&
         ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keyb)), keyb) >= 0 &&
         ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(absb)), absb) >= 0) {
       if (pad_ord_test_bit(keyb, BTN_GAMEPAD) &&

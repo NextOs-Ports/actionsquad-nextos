@@ -33,7 +33,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 
-NXEXTRACT_VERSION = "1.2.10"
+NXEXTRACT_VERSION = "1.2.12"
 FORMAT_VERSION = 1
 TRANSACTION_FORMAT_VERSION = 2
 TERMINAL_RESULT_SCHEMA = "org.nextos.nxextract.terminal-result"
@@ -864,6 +864,24 @@ class Recipe:
                         "overlapping commit paths are not allowed: %s / %s"
                         % (left, right)
                     )
+        mutable = data.get("mutable", [])
+        if (not isinstance(mutable, list) or len(mutable) > 32 or
+                any(not isinstance(item, str) for item in mutable)):
+            raise RecipeError("mutable must be a list of at most 32 paths")
+        for item in mutable:
+            validate_relative_path(item, "mutable path")
+            if "{abi}" in item:
+                raise RecipeError("mutable path must not use {abi}: %s" % item)
+            if not any(
+                portable_path_key(item) == portable_path_key(plain)
+                or portable_path_key(item).startswith(
+                    portable_path_key(plain) + "/")
+                for plain in (
+                    entry.replace("{abi}", "ABI") for entry in normalized)):
+                raise RecipeError(
+                    "mutable path must live under a commit path: %s" % item)
+        if len({portable_path_key(item) for item in mutable}) != len(mutable):
+            raise RecipeError("duplicate mutable path")
         marker = data.get("marker", ".nxextract-%s.json" % identifier)
         validate_relative_path(marker, "marker")
         if paths_overlap(marker, log):
@@ -1280,6 +1298,12 @@ class Recipe:
         self._validate_validation(check, label)
 
     @property
+    def mutable_paths(self):
+        """P12: caminhos sob commit que o GUEST pode criar/alterar (saves
+        gravados junto dos assets). Ficam FORA do selo de metadados."""
+        return tuple(self.data.get("mutable", []))
+
+    @property
     def identifier(self):
         return self.data["id"]
 
@@ -1650,6 +1674,7 @@ def terminal_result_payload(
     marker=None,
     validated=False,
     error=None,
+    ui=None,
 ):
     phase = max(0, min(8, int(progress.phase)))
     items = _result_items(plan=plan, marker=marker) if validated else []
@@ -1673,6 +1698,19 @@ def terminal_result_payload(
         "package_id": selection["package_id"],
         "abi": selection["abi"],
         "container": selection["container"],
+        # P11.7: como a setup UI terminou. "visible" = renderer atestado;
+        # "headless-fallback" = renderer nao abriu e a extracao seguiu sem a
+        # barra visual (fallback_reason nomeia o motivo, com a ultima linha do
+        # log da UI); "disabled" = UI desligada/opcional ausente.
+        "ui": {
+            "mode": ("visible" if ui is not None and ui.ready else
+                     ("headless-fallback"
+                      if ui is not None and ui.headless_reason else
+                      "disabled")),
+            "renderer": ui.renderer if ui is not None else None,
+            "fallback_reason": (ui.headless_reason
+                                if ui is not None else None),
+        },
         "validated": {
             "items": len(items),
             "bytes": sum(item["size"] for item in items),
@@ -3123,15 +3161,23 @@ def validate_recipe_outputs(root, recipe, abi, plan=None, marker=None, full=True
     return checked
 
 
-def payload_metadata_seal(root, commit_paths):
-    """Cheap per-launch seal created only after a full payload validation."""
+def payload_metadata_seal(root, commit_paths, mutable_paths=()):
+    """Cheap per-launch seal created only after a full payload validation.
+    P12: objetos listados em mutable_paths (saves que o guest grava dentro do
+    payload) ficam FORA do selo — o jogo salvar nao pode invalidar o marker."""
     digest = hashlib.sha256()
     object_count = 0
     portable_objects = {}
+    mutable_keys = tuple(portable_path_key(item) for item in mutable_paths)
+
+    def is_mutable(key):
+        return any(key == mk or key.startswith(mk + "/") for mk in mutable_keys)
 
     def add_object(kind, relative, info=None):
         nonlocal object_count
         key = portable_path_key(relative)
+        if is_mutable(key):
+            return
         previous = portable_objects.get(key)
         if previous is not None and previous != relative:
             raise ValidationError(
@@ -3195,10 +3241,10 @@ def payload_metadata_seal(root, commit_paths):
     return digest.hexdigest(), object_count
 
 
-def marker_payload_seal_valid(marker, game_dir):
+def marker_payload_seal_valid(marker, game_dir, mutable_paths=()):
     try:
         actual_seal, actual_count = payload_metadata_seal(
-            game_dir, marker["commit"]
+            game_dir, marker["commit"], mutable_paths
         )
     except (OSError, NXError, KeyError, TypeError):
         return False
@@ -3846,7 +3892,7 @@ def recover_transaction(recipe, game_dir, workspace, marker_path, logger):
                     marker=marker,
                     full=True,
                 )
-                if not marker_payload_seal_valid(marker, game_dir):
+                if not marker_payload_seal_valid(marker, game_dir, recipe.mutable_paths):
                     raise ValidationError(
                         "published marker payload metadata seal mismatch"
                     )
@@ -3868,7 +3914,7 @@ def recover_transaction(recipe, game_dir, workspace, marker_path, logger):
 
 def _write_install_marker(marker_path, recipe, plan, transaction_id, game_dir):
     payload_seal, payload_objects = payload_metadata_seal(
-        game_dir, plan.commit_paths
+        game_dir, plan.commit_paths, recipe.mutable_paths
     )
     marker = {
         "format": FORMAT_VERSION,
@@ -4059,6 +4105,7 @@ class UISession:
         self.log_stream = None
         self.ready = False
         self.renderer = None
+        self.headless_reason = None
 
     def _prepare_runtime(self):
         (
@@ -4156,6 +4203,52 @@ class UISession:
             )
         return proof[len(b"visible=") : -1].decode("ascii")
 
+    def _last_ui_log_line(self):
+        """Ultima linha util do log da propria UI: e o MOTIVO que o resumo
+        precisa nomear (ex.: "nxextract-ui: SDL_CreateWindow failed: ...")."""
+        try:
+            with open(self.log_path, "rb") as stream:
+                stream.seek(0, os.SEEK_END)
+                size = stream.tell()
+                stream.seek(max(0, size - 4096))
+                tail = stream.read(4096).decode("utf-8", "replace")
+        except OSError:
+            return None
+        for line in reversed(tail.splitlines()):
+            line = line.strip()
+            if line:
+                return line[:240]
+        return None
+
+    def _fallback_headless(self, reason):
+        """P11.7: a UI visivel nao abriu; a instalacao NAO pode morrer por isso
+        -- a UI e so a barra de progresso. Extrai headless e registra o motivo
+        (ui_fallback no NXEXTRACT_RESULT). O gate de release/QA restaura o
+        fail-closed com NXEXTRACT_REQUIRE_VISIBLE_UI=1."""
+        detail = self._last_ui_log_line()
+        message = reason if not detail else "%s; last UI line: %s" % (
+            reason, detail)
+        if os.environ.get("NXEXTRACT_REQUIRE_VISIBLE_UI") == "1":
+            raise NXError("mandatory setup UI failed and "
+                          "NXEXTRACT_REQUIRE_VISIBLE_UI=1 forbids the headless "
+                          "fallback: %s" % message)
+        if self.process is not None and self.process.poll() is None:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                try:
+                    self.process.kill()
+                except OSError:
+                    pass
+        self.headless_reason = message
+        self.logger.log(
+            "setup UI could not open a visible renderer (%s)" % message)
+        self.logger.log(
+            "continuing HEADLESS: installation proceeds without the visual "
+            "progress bar; result will record ui_fallback=headless")
+        return False
+
     def _find_binary(self):
         if self.ui_option in (None, "none", "off", "0"):
             return None
@@ -4179,13 +4272,15 @@ class UISession:
         binary = self._find_binary()
         if not binary:
             if self.require_ui:
-                raise NXError("mandatory setup UI binary is unavailable")
+                return self._fallback_headless(
+                    "mandatory setup UI binary is unavailable")
             return False
         try:
             self._prepare_runtime()
         except (NXError, OSError) as error:
             if self.require_ui:
-                raise
+                return self._fallback_headless(
+                    "setup UI runtime could not be prepared: %s" % error)
             self.logger.log("setup UI unavailable (%s); continuing headless" % error)
             return False
         for runtime_path in (self.stop_path, self.ready_path):
@@ -4216,7 +4311,8 @@ class UISession:
             self.log_stream.close()
             self.log_stream = None
             if self.require_ui:
-                raise NXError("mandatory setup UI could not start: %s" % error)
+                return self._fallback_headless(
+                    "mandatory setup UI could not start: %s" % error)
             self.logger.log("setup UI unavailable (%s); continuing headless" % error)
             return False
 
@@ -4229,16 +4325,20 @@ class UISession:
             while time.monotonic() < deadline:
                 status = self.process.poll()
                 if status is not None:
-                    raise NXError(
-                        "mandatory setup UI exited before opening a visible renderer"
+                    return self._fallback_headless(
+                        "mandatory setup UI exited before opening a visible "
+                        "renderer (status %s)" % status
                     )
                 if os.path.lexists(self.ready_path):
-                    renderer = self._read_graphical_ready_proof()
+                    try:
+                        renderer = self._read_graphical_ready_proof()
+                    except NXError as error:
+                        return self._fallback_headless(str(error))
                     # Do not accept a proof dropped by a helper that immediately
                     # died. Ongoing progress writes keep checking the child too.
                     time.sleep(0.02)
                     if self.process.poll() is not None:
-                        raise NXError(
+                        return self._fallback_headless(
                             "mandatory setup UI exited after publishing readiness"
                         )
                     self.ready = True
@@ -4249,7 +4349,9 @@ class UISession:
                     )
                     return True
                 time.sleep(0.05)
-            raise NXError("mandatory setup UI did not confirm a visible renderer")
+            return self._fallback_headless(
+                "mandatory setup UI did not confirm a visible renderer within "
+                "%ds" % self.READY_TIMEOUT_SECONDS)
         return True
 
     def assert_visible(self):
@@ -4383,7 +4485,7 @@ def marker_fast_valid(marker_path, recipe, game_dir, logger):
     except (OSError, NXError) as error:
         logger.miss("marker-validation", "existing marker rejected: %s" % error)
         return None
-    if not marker_payload_seal_valid(marker, game_dir):
+    if not marker_payload_seal_valid(marker, game_dir, recipe.mutable_paths):
         logger.miss(
             "marker-validation",
             "existing marker rejected: payload metadata seal mismatch",
@@ -4532,6 +4634,7 @@ def install_command(args):
             marker=selected_marker,
             validated=validated,
             error=error,
+            ui=ui,
         )
         publish_terminal_result(result_path, payload)
 
@@ -4836,7 +4939,7 @@ def verify_command(args):
     validate_recipe_outputs(
         game_dir, recipe, marker["abi"], marker=marker, full=True
     )
-    if not marker_payload_seal_valid(marker, game_dir):
+    if not marker_payload_seal_valid(marker, game_dir, recipe.mutable_paths):
         raise ValidationError("installation payload metadata seal mismatch")
     print(
         "OK: %s version %s, ABI %s"

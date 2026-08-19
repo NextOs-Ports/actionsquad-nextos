@@ -40,6 +40,16 @@ void nxgl_frame_proof_set_resolver(void *(*resolver)(const char *));
 /* Emit the launch receipt. Call once, early, before anything can fail. */
 void nxgl_frame_proof_launch_receipt(void);
 
+/* Optional (E2): register the video context once it exists, so the final
+ * "VIDEO:" receipt names the window and the GL stack a reader needs. Any
+ * argument may be 0/NULL; the receipt then prints "?" for that field. Strings
+ * are copied (bounded), so SDL_GetError()/glGetString results may be passed
+ * directly. */
+void nxgl_frame_proof_set_video_context(int width, int height,
+                                        const char *driver,
+                                        const char *renderer,
+                                        const char *version);
+
 /* Read back the presented frame and record it. Call at more than one frame: a
  * title card can legitimately be black at the first sample, and one reading
  * turns that into a false verdict. */

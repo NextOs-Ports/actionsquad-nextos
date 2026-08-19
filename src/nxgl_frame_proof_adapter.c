@@ -27,6 +27,7 @@
 typedef void (*nxgl_fp_read_pixels)(int, int, int, int, unsigned, unsigned,
                                     void *);
 typedef void (*nxgl_fp_get_integerv)(unsigned, int *);
+typedef unsigned (*nxgl_fp_get_error)(void);
 
 static void *(*g_resolver)(const char *);
 
@@ -149,6 +150,34 @@ static int g_samples;
 static int g_unmeasured; /* probes that could not read the frame at all */
 static int g_published;
 
+/* E2: context + evidence for the single-line "VIDEO:" receipt. All additive;
+ * a port that never registers context still gets the receipt with "?". */
+static int g_ctx_w, g_ctx_h, g_ctx_set;
+static char g_ctx_driver[64], g_ctx_renderer[96], g_ctx_version[96];
+static unsigned g_last_gl_error;   /* last nonzero glGetError seen at a probe */
+static int g_invalid_drawable;     /* probes refused for a 0x0/absurd drawable */
+static double g_last_alpha0_pct;   /* alpha==0 share of the last probe */
+
+static void copy_bounded(char *dst, size_t cap, const char *src) {
+  size_t i = 0;
+  if (src)
+    for (; src[i] && i + 1 < cap; i++)
+      dst[i] = (src[i] == '\n' || src[i] == '"') ? ' ' : src[i];
+  dst[i] = 0;
+}
+
+void nxgl_frame_proof_set_video_context(int width, int height,
+                                        const char *driver,
+                                        const char *renderer,
+                                        const char *version) {
+  g_ctx_w = width;
+  g_ctx_h = height;
+  copy_bounded(g_ctx_driver, sizeof g_ctx_driver, driver);
+  copy_bounded(g_ctx_renderer, sizeof g_ctx_renderer, renderer);
+  copy_bounded(g_ctx_version, sizeof g_ctx_version, version);
+  g_ctx_set = 1;
+}
+
 /* A launch that could never put an image on the panel cannot be used to accuse
  * the port of drawing nothing. */
 static const char *launch_context(int *conclusive) {
@@ -194,6 +223,7 @@ void nxgl_frame_proof_sample(int width, int height) {
     height = viewport[3];
   }
   if (width <= 0 || height <= 0 || width > 32768 || height > 32768) {
+    g_invalid_drawable++;
     printf("gl: frame probe unavailable (invalid drawable %dx%d)\n", width,
            height);
     fflush(stdout);
@@ -218,6 +248,19 @@ void nxgl_frame_proof_sample(int width, int height) {
     return;
   }
   read_pixels(0, 0, width, height, NXGL_FP_RGBA, NXGL_FP_UNSIGNED_BYTE, buffer);
+  {
+    /* E2: um erro GL pendente no momento do probe (ex.: blit 0x506
+     * GL_INVALID_FRAMEBUFFER_OPERATION) e exatamente o motivo de muitos pretos.
+     * Drena a fila e guarda o ultimo != 0 para o recibo VIDEO. */
+    nxgl_fp_get_error get_error =
+        (nxgl_fp_get_error)resolve_gl("glGetError");
+    if (get_error) {
+      unsigned err;
+      int guard = 0;
+      while ((err = get_error()) != 0 && guard++ < 8)
+        g_last_gl_error = err;
+    }
+  }
 
   size_t coloured = 0, opaque = 0, transparent = 0;
   for (size_t i = 0; i < pixels; i++) {
@@ -244,6 +287,7 @@ void nxgl_frame_proof_sample(int width, int height) {
     }
   }
   free(buffer);
+  g_last_alpha0_pct = (double)transparent * 100.0 / (double)pixels;
   if (non_black > g_best_non_black)
     g_best_non_black = non_black;
 
@@ -251,6 +295,48 @@ void nxgl_frame_proof_sample(int width, int height) {
          "alpha0=%.1f%%\n",
          width, height, non_black, (double)opaque * 100.0 / (double)pixels,
          (double)transparent * 100.0 / (double)pixels);
+  fflush(stdout);
+}
+
+
+/* E2: the single-line receipt a human reads first. Additive -- the historical
+ * "gl: frame proof verdict=" line and its NXEVENT stay untouched above. */
+static void publish_video_receipt(const char *verdict, int conclusive) {
+  char window[32], reason[48];
+  if (g_ctx_set && g_ctx_w > 0 && g_ctx_h > 0)
+    snprintf(window, sizeof window, "%dx%d", g_ctx_w, g_ctx_h);
+  else
+    snprintf(window, sizeof window, "?");
+  if (strcmp(verdict, "OK") == 0)
+    snprintf(reason, sizeof reason, "none");
+  else if (strcmp(verdict, "UNMEASURED") == 0)
+    snprintf(reason, sizeof reason, "readback-unresolved");
+  else if (strcmp(verdict, "UNKNOWN") == 0)
+    snprintf(reason, sizeof reason, g_invalid_drawable > 0
+             ? "window-invalid" : "no-frames-sampled");
+  else if (g_last_gl_error)
+    snprintf(reason, sizeof reason, "gl-error-0x%X", g_last_gl_error);
+  else if (g_last_alpha0_pct >= 99.0)
+    snprintf(reason, sizeof reason, "alpha-zero");
+  else if (conclusive)
+    snprintf(reason, sizeof reason, "all-black");
+  else
+    snprintf(reason, sizeof reason, "launch-cannot-prove");
+
+  if (g_samples > 0)
+    printf("VIDEO: window=%s driver=%s renderer=%s gles=\"%s\" "
+           "frame_proof=%.1f%% verdict=%s reason=%s\n",
+           window, g_ctx_set && g_ctx_driver[0] ? g_ctx_driver : "?",
+           g_ctx_set && g_ctx_renderer[0] ? g_ctx_renderer : "?",
+           g_ctx_set && g_ctx_version[0] ? g_ctx_version : "?",
+           g_best_non_black, verdict, reason);
+  else
+    printf("VIDEO: window=%s driver=%s renderer=%s gles=\"%s\" "
+           "frame_proof=unsampled verdict=%s reason=%s\n",
+           window, g_ctx_set && g_ctx_driver[0] ? g_ctx_driver : "?",
+           g_ctx_set && g_ctx_renderer[0] ? g_ctx_renderer : "?",
+           g_ctx_set && g_ctx_version[0] ? g_ctx_version : "?",
+           verdict, reason);
   fflush(stdout);
 }
 
@@ -277,6 +363,8 @@ void nxgl_frame_proof_publish(void) {
              "(run ended before the first probe)\n",
              context);
     fflush(stdout);
+    publish_video_receipt(g_unmeasured > 0 ? "UNMEASURED" : "UNKNOWN",
+                          conclusive);
     return;
   }
 
@@ -300,4 +388,5 @@ void nxgl_frame_proof_publish(void) {
          !black ? "ok" : (conclusive ? "black" : "inconclusive"), g_samples,
          g_best_non_black, context, conclusive ? "true" : "false");
   fflush(stdout);
+  publish_video_receipt(verdict, conclusive);
 }
