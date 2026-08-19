@@ -48,7 +48,7 @@
     {
       "kind": "launcher",
       "mode": "0755",
-      "sha256": "aa681cf1be390141eb6124aa25fc87305dafffee716d0fa26a9a57bdb1d92bce",
+      "sha256": "271e0f84140b1ee8d3fa5b5e8bd22ab1956b82c19165eba42f43672cacb0b14e",
       "source": "Action Squad.sh",
       "target": "Action Squad.sh"
     },
@@ -146,7 +146,7 @@
     {
       "kind": "payload",
       "mode": "0644",
-      "sha256": "f5e5c9534532840fcd45bb002e69ed85c61dba2753450e26b448b7df1481e24d",
+      "sha256": "d1b77b88f4b9f675a900e4143ac768a21218623cfe1703ca43162388c3271bd6",
       "source": "version.txt",
       "target": "actionsquad/version.txt"
     },
@@ -267,7 +267,7 @@
       "config_path": "actionsquad/nxport.json",
       "config_sha256": "34cee8a17a68d21867628402353f8dd91c8ad86ee1687c0058b798d6df0ec404",
       "generator": "nxbootstrap",
-      "version": "0.6.23"
+      "version": "0.6.26"
     },
     "license": {
       "file": "actionsquad/LICENSE",
@@ -276,7 +276,7 @@
     },
     "port_dir": "actionsquad",
     "profile": "universal-portmaster",
-    "version": "1.0.3"
+    "version": "1.0.4"
   },
   "portmaster_metadata": {
     "gameinfo_xml": {
