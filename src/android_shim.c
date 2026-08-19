@@ -402,6 +402,60 @@ static void pb_send_motion(float lx, float ly, float rx, float ry, float hx,
   pb_processMotion(&ev);
 }
 
+/* ---- Canal do MENU (CControllersManager) --------------------------------
+ * Causa-raiz do "menu morto" no Knulli/CubeXX (relato bbilford83): a UI de
+ * foco (layer SWITCHCONTROL etc.) NAO escuta Paddleboat — ela consome
+ * SendControllerButton/SendControllerAxis -> CControllersManager::Receive*.
+ * Nossa ponte so alimentava o Paddleboat (gameplay), entao o menu nunca via
+ * botao nenhum.  Mapa extraido do proprio EngineHandleJoystickInput do jogo
+ * (jump table keycode->ID interno, .rodata 0x3e9814):
+ *   A=0  B=1  X=2  Y=3  SELECT=4  START=6  L1|THUMBL=9  R1|THUMBR=10
+ *   eixo 0 = dpad vertical (UP=-1)   eixo 1 = dpad horizontal (LEFT=-1)
+ *   eixo 4 = L2                      eixo 5 = R2 */
+static void (*ui_send_button)(int, int);
+static void (*ui_send_axis)(float, unsigned char);
+
+static void ui_try_resolve(void) {
+  static int tried = 0;
+  if (tried) return;
+  tried = 1;
+  ui_send_button =
+      (void (*)(int, int))so_find_addr_safe("_Z20SendControllerButtonbi");
+  ui_send_axis =
+      (void (*)(float, unsigned char))so_find_addr_safe(
+          "_Z18SendControllerAxisfh");
+  debugPrintf("android_shim: canal do menu (SendControllerButton) %s\n",
+              (ui_send_button && ui_send_axis) ? "resolvido" : "AUSENTE");
+}
+
+static int keycode_to_ui_id(int kc) {
+  switch (kc) {
+  case AKEYCODE_BUTTON_A: return 0;
+  case AKEYCODE_BUTTON_B: return 1;
+  case AKEYCODE_BUTTON_X: return 2;
+  case AKEYCODE_BUTTON_Y: return 3;
+  case AKEYCODE_BUTTON_SELECT: return 4;
+  case AKEYCODE_BUTTON_START: return 6;
+  case AKEYCODE_BUTTON_L1: case AKEYCODE_BUTTON_THUMBL: return 9;
+  case AKEYCODE_BUTTON_R1: case AKEYCODE_BUTTON_THUMBR: return 10;
+  default: return -1;
+  }
+}
+
+static void ui_send_key(int action, int kc) {
+  ui_try_resolve();
+  if (!ui_send_button) return;
+  int id = keycode_to_ui_id(kc);
+  if (id >= 0) ui_send_button(action == AKEY_EVENT_ACTION_DOWN ? 1 : 0, id);
+}
+
+static void ui_send_dpad(float hx, float hy) {
+  ui_try_resolve();
+  if (!ui_send_axis) return;
+  ui_send_axis(hy, 0); /* vertical: UP=-1 */
+  ui_send_axis(hx, 1); /* horizontal: LEFT=-1 */
+}
+
 /* ---- Process SDL events into input queue ---- */
 
 #define STICK_DEADZONE 8000
@@ -1020,9 +1074,13 @@ static void process_sdl_events(void) {
         if (!as_maybe_confirm_splash(act, kc)) {
           push_key_event(act, kc);
           pb_send_key(act, kc);
+          ui_send_key(act, kc);
         }
       }
-      if (dpadbtn >= 0) update_hat_from_dpad(dpadbtn, dn);
+      if (dpadbtn >= 0) {
+        update_hat_from_dpad(dpadbtn, dn);
+        ui_send_dpad(g_hat_x, g_hat_y);
+      }
       if (stick) {
         float lx = (kb_d ? 1.0f : 0.0f) - (kb_a ? 1.0f : 0.0f);
         float ly = (kb_s ? 1.0f : 0.0f) - (kb_w ? 1.0f : 0.0f);
@@ -1042,6 +1100,7 @@ static void process_sdl_events(void) {
         if (!as_maybe_confirm_splash(AKEY_EVENT_ACTION_DOWN, kc)) {
           push_key_event(AKEY_EVENT_ACTION_DOWN, kc);
           pb_send_key(AKEY_EVENT_ACTION_DOWN, kc);
+          ui_send_key(AKEY_EVENT_ACTION_DOWN, kc);
         }
         debugPrintf("android_shim: button DOWN keycode=%d\n", kc);
       }
@@ -1050,6 +1109,7 @@ static void process_sdl_events(void) {
       if (e.cbutton.button >= SDL_CONTROLLER_BUTTON_DPAD_UP &&
           e.cbutton.button <= SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
         update_hat_from_dpad(e.cbutton.button, 1);
+        ui_send_dpad(g_hat_x, g_hat_y);
         push_joystick_event(g_last_lx, g_last_ly, g_last_rx, g_last_ry,
                             g_hat_x, g_hat_y, g_last_lt, g_last_rt);
         pb_send_motion(g_last_lx, g_last_ly, g_last_rx, g_last_ry, g_hat_x,
@@ -1065,11 +1125,13 @@ static void process_sdl_events(void) {
         if (!as_maybe_confirm_splash(AKEY_EVENT_ACTION_UP, kc)) {
           push_key_event(AKEY_EVENT_ACTION_UP, kc);
           pb_send_key(AKEY_EVENT_ACTION_UP, kc);
+          ui_send_key(AKEY_EVENT_ACTION_UP, kc);
         }
       }
       if (e.cbutton.button >= SDL_CONTROLLER_BUTTON_DPAD_UP &&
           e.cbutton.button <= SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
         update_hat_from_dpad(e.cbutton.button, 0);
+        ui_send_dpad(g_hat_x, g_hat_y);
         push_joystick_event(g_last_lx, g_last_ly, g_last_rx, g_last_ry,
                             g_hat_x, g_hat_y, g_last_lt, g_last_rt);
         pb_send_motion(g_last_lx, g_last_ly, g_last_rx, g_last_ry, g_hat_x,

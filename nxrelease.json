@@ -81,7 +81,7 @@
         "libpthread.so.0"
       ],
       "provenance": "port build script; framework pinned by FRAMEWORK-PIN.json",
-      "sha256": "6be238d19bdd0bcca1923fa2bdabe8d44b14462c1e2e7a833c8824f9fa522922",
+      "sha256": "d525b4e01888c9ff9a40e5151a03d3250f1fb8f21e243fa404cd4e8806642bbe",
       "soname": null,
       "source": "actionsquad-nextos",
       "target": "actionsquad/actionsquad-nextos"
@@ -146,7 +146,7 @@
     {
       "kind": "payload",
       "mode": "0644",
-      "sha256": "d1b77b88f4b9f675a900e4143ac768a21218623cfe1703ca43162388c3271bd6",
+      "sha256": "8c54bfab7f1ae9bd1a7148eae41e7b0a8f4ad3726e0cac70f823a2d45db9e60c",
       "source": "version.txt",
       "target": "actionsquad/version.txt"
     },
@@ -276,7 +276,7 @@
     },
     "port_dir": "actionsquad",
     "profile": "universal-portmaster",
-    "version": "1.0.4"
+    "version": "1.0.5"
   },
   "portmaster_metadata": {
     "gameinfo_xml": {
