@@ -1,5 +1,18 @@
 # Action Squad — 2 missões deixadas (19/08, madrugada)
 
+> STATUS 19/08 (tarde): **Missão 1 IMPLEMENTADA e PUBLICADA (v1.0.5)** — canal
+> SendControllerButton/SendControllerAxis alimentado em paralelo ao Paddleboat;
+> mapa de IDs extraido do EngineHandleJoystickInput (jump table .rodata
+> 0x3e9814): A=0 B=1 X=2 Y=3 SELECT=4 START=6 L1|THUMBL=9 R1|THUMBR=10;
+> eixo0=dpad vertical (UP=-1), eixo1=horizontal (LEFT=-1), eixo4=L2, eixo5=R2.
+> Provado no .137 com COI_DEBUG=1: "canal do menu (SendControllerButton)
+> resolvido" + botao A entregue; frame proof 99.9%; chord status 0. Falta so a
+> confirmacao do tester no CubeXX.
+>
+> **Missão 2 AVANÇADA (bancada)** — radiografia do stack 32-bit do Flip feita
+> na imagem spruce v4.3.4 (abaixo) + nxgl agora anexa o SDL_GetError() ao
+> "video-init-failed" (o proximo log de campo diz a causa exata).
+
 ## Missão 1 — CONTROLES NO MENU não respondem (RG CubeXX / Knulli) 🔴 causa-raiz ACHADA
 
 **Sintoma de campo (bbilford83):** com v1.0.3 o pop-up "Controller detected" some
@@ -65,3 +78,24 @@ egl_shim: janela real nao foi criada  → exit 1
 Ambos os aparelhos são de TESTER (não temos Flip nem CubeXX na mão) — usar as
 IMAGENS já baixadas: `cfw-images/knulli-h700-rg-cubexx-...img.gz` (CubeXX) e
 `cfw-images/spruceV4.3.4.7z` (Flip) + o .137 pra regressão.
+
+
+## Radiografia da CAMADA 7 (19/08, bancada — imagem spruce v4.3.4 do Flip)
+
+- O SDL2 32-bit do muOS-pixie (`muOS-pixie-reduced.sqsh:usr/lib32/
+  libSDL2-2.0.so.0.2800.5`) tem **UM unico video driver: "mali"**
+  ("Mali EGL Video Driver", usa /dev/fb0 + EGL do blob). Nao ha KMSDRM/fbcon.
+  O SDL2 64-bit do spruce tem wayland/KMSDRM/dummy/offscreen.
+- `usr/lib32/libEGL.so` -> symlink p/ **libmali.so** (blob real);
+  `libEGL.so.1` -> `libEGL.so.1.4.0` = **stub de 3KB** com DT_NEEDED
+  libmali.so.0 (mesma classe do #39 do ArkOS: o versionado e stub!).
+- O mundo 32-bit no Flip e MONTADO sob demanda: `setup_32bit_libs.sh` cria
+  overlay em /usr e symlinks `/usr/lib32 -> /mnt/SDCARD/Persistent/
+  .32bit_chroot/usr/lib32/` + copia ld-linux-armhf.so.3 p/ /usr/lib;
+  `mount_muOS.sh` monta o sqsh em /mnt/SDCARD/spruce/flip/muOS.
+- Hipoteses da falha VIDEO_START (a confirmar com o proximo log, que agora
+  traz o SDL_GetError()): (a) driver "mali" indisponivel porque o dlopen do
+  EGL 32-bit falha no ambiente do port; (b) /dev/fb0 EBUSY com o frontend
+  64-bit segurando o display; (c) ordem de LD_LIBRARY_PATH pegando um EGL
+  errado. O nxsplash desenha via fbdev cru = fb0 funciona quando livre.
+- Proximo passo de campo: pedir novo log v1.0.8+ (nxgl com detalhe) ao tester.
